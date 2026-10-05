@@ -1,0 +1,17 @@
+post_install() {
+  cat <<'MSG'
+==> Screenshooter: run `screenshooter` once, or log out and back in.
+    The first start registers global shortcuts in KDE:
+      Meta+Shift+S  region     Shift+Print  whole screen
+    They are taken over from Spectacle if it holds them.
+    Change them in ~/.config/screenshooter.conf, then run `screenshooter install-hotkey`.
+MSG
+}
+
+pre_remove() {
+  cat <<'MSG'
+==> Screenshooter: shortcuts stay registered in KDE after removal.
+    Free them with `screenshooter uninstall-hotkey` before removing,
+    or later in System Settings > Keyboard > Shortcuts.
+MSG
+}

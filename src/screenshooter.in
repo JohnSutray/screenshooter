@@ -1,0 +1,12 @@
+#!/bin/sh
+# Screenshooter launcher.
+#
+# gtk4-layer-shell has to be loaded before libwayland-client, which a Python program
+# can't guarantee on its own, so it is preloaded here. The system interpreter is used
+# directly: no binary is linked against a particular libpython, so Python upgrades
+# don't break the app.
+SCREENSHOOTER_PRELOAD=@LAYER_SHELL_LIB@
+export SCREENSHOOTER_PRELOAD
+LD_PRELOAD="$SCREENSHOOTER_PRELOAD${LD_PRELOAD:+:$LD_PRELOAD}"
+export LD_PRELOAD
+exec @PYTHON@ @LIBDIR@/screenshooter.py "$@"

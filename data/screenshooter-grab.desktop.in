@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Screenshooter capture helper
+Comment=Grants the capture helper access to KWin's screenshot interface
+Exec=@LIBDIR@/screenshooter-grab
+Terminal=false
+NoDisplay=true
+X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2

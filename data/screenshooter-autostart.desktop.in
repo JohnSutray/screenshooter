@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Screenshooter
+Comment=Background instance of Screenshooter, so hotkeys react instantly
+Exec=@BINDIR@/screenshooter daemon
+Icon=@ID@
+Terminal=false
+NoDisplay=true
+StartupNotify=false
+OnlyShowIn=KDE;
+X-KDE-autostart-phase=2

@@ -1,0 +1,45 @@
+# Maintainer: Andy (JohnSutray) <44319560+JohnSutray@users.noreply.github.com>
+pkgname=screenshooter
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Win+Shift+S-style screen snipping and annotation for KDE Plasma on Wayland"
+arch=('x86_64' 'aarch64')
+url="https://github.com/JohnSutray/screenshooter"
+license=('MIT')
+depends=(
+  'glib2'
+  'gtk4'
+  'gtk4-layer-shell'
+  'kconfig'
+  'kwin'
+  'libxkbcommon'
+  'python'
+  'python-cairo'
+  'python-gobject'
+  'python-pillow'
+  'wl-clipboard'
+)
+makedepends=('pkgconf')
+optdepends=(
+  'spectacle: fallback capture method'
+  'xdg-user-dirs: save into the localized Pictures folder'
+)
+install=screenshooter.install
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname-$pkgver"
+  make PREFIX=/usr
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  make PREFIX=/usr check
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  make PREFIX=/usr DESTDIR="$pkgdir" install
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

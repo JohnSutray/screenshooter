@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Screenshooter
+GenericName=Screenshot Tool
+GenericName[ru]=Снимок экрана
+Comment=Snip a screen region and annotate it, like Win+Shift+S
+Comment[ru]=Снимок области экрана с пометками, как Win+Shift+S в Windows
+Exec=@BINDIR@/screenshooter
+Icon=@ID@
+Terminal=false
+StartupNotify=false
+DBusActivatable=true
+Categories=Utility;Graphics;
+Keywords=screenshot;snip;snipping;capture;annotate;
+Keywords[ru]=скриншот;снимок;ножницы;экран;
+X-KDE-Shortcuts=Meta+Shift+S

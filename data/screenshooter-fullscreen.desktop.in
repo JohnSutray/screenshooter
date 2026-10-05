@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Screenshooter: Whole Screen
+Name[ru]=Снимок всего экрана
+Comment=Capture the whole screen with Screenshooter
+Comment[ru]=Снимок всего экрана в Screenshooter
+# Wakes the running instance over D-Bus (starting it if needed): faster than a new process.
+# Separate desktop file on purpose: kglobalaccel caches a component's file and ignores
+# actions added to it later.
+Exec=gdbus call --session --dest @ID@ --object-path @OBJPATH@ --method org.freedesktop.Application.ActivateAction fullscreen [] {}
+Icon=@ID@
+Terminal=false
+NoDisplay=true
+StartupNotify=false
+X-KDE-Shortcuts=Shift+Print
