@@ -22,14 +22,27 @@ Snipping tool for **KDE Plasma on Wayland** that works like **Win+Shift+S** on W
 
 ## Install
 
-### Arch Linux, CachyOS, EndeavourOS, Manjaro (AUR)
+### Arch Linux, CachyOS, EndeavourOS, Manjaro
+
+A ready-made package is attached to every [release](https://github.com/JohnSutray/screenshooter/releases):
 
 ```bash
-yay -S screenshooter
+sudo pacman -U https://github.com/JohnSutray/screenshooter/releases/download/v0.1.0/screenshooter-0.1.0-1-x86_64.pkg.tar.zst
 ```
 
-Then run `screenshooter` once, or log out and back in. On the first start it registers its
-global shortcuts in KDE. The keys are taken over from Spectacle if it holds them.
+Or build it yourself from the PKGBUILD in this repository:
+
+```bash
+git clone https://github.com/JohnSutray/screenshooter
+cd screenshooter/packaging/aur
+makepkg -si
+```
+
+The package is headed for the AUR as `screenshooter`. AUR account registration is paused
+right now, so it will appear there once registration reopens.
+
+After installing, run `screenshooter` once, or log out and back in. On the first start it
+registers its global shortcuts in KDE. The keys are taken over from Spectacle if it holds them.
 
 ### From source, for the current user
 

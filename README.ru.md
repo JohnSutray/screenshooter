@@ -22,14 +22,27 @@
 
 ## Установка
 
-### Arch Linux, CachyOS, EndeavourOS, Manjaro (AUR)
+### Arch Linux, CachyOS, EndeavourOS, Manjaro
+
+Готовый пакет приложен к каждому [релизу](https://github.com/JohnSutray/screenshooter/releases):
 
 ```bash
-yay -S screenshooter
+sudo pacman -U https://github.com/JohnSutray/screenshooter/releases/download/v0.1.0/screenshooter-0.1.0-1-x86_64.pkg.tar.zst
 ```
 
-Потом один раз запусти `screenshooter` или перезайди в сеанс. При первом запуске программа
-сама назначит глобальные клавиши в KDE и заберёт их у Spectacle, если они были заняты им.
+Или собери сам из PKGBUILD в этом репозитории:
+
+```bash
+git clone https://github.com/JohnSutray/screenshooter
+cd screenshooter/packaging/aur
+makepkg -si
+```
+
+Пакет готовится к публикации в AUR под именем `screenshooter`. Регистрация в AUR сейчас
+приостановлена, поэтому он появится там, когда её откроют.
+
+После установки один раз запусти `screenshooter` или перезайди в сеанс. При первом запуске
+программа сама назначит глобальные клавиши в KDE и заберёт их у Spectacle, если они были заняты им.
 
 ### Из исходников, для текущего пользователя
 
