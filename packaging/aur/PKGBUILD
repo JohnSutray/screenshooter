@@ -26,7 +26,7 @@ optdepends=(
 )
 install=screenshooter.install
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('8d38960847af275feabebcd9e0e0250405b04c1494239b89c654fa1fb509c512')
 
 build() {
   cd "$pkgname-$pkgver"

@@ -1,0 +1,27 @@
+pkgbase = screenshooter
+	pkgdesc = Win+Shift+S-style screen snipping and annotation for KDE Plasma on Wayland
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/JohnSutray/screenshooter
+	install = screenshooter.install
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = pkgconf
+	depends = glib2
+	depends = gtk4
+	depends = gtk4-layer-shell
+	depends = kconfig
+	depends = kwin
+	depends = libxkbcommon
+	depends = python
+	depends = python-cairo
+	depends = python-gobject
+	depends = python-pillow
+	depends = wl-clipboard
+	optdepends = spectacle: fallback capture method
+	optdepends = xdg-user-dirs: save into the localized Pictures folder
+	source = screenshooter-0.1.0.tar.gz::https://github.com/JohnSutray/screenshooter/archive/refs/tags/v0.1.0.tar.gz
+	sha256sums = 8d38960847af275feabebcd9e0e0250405b04c1494239b89c654fa1fb509c512
+
+pkgname = screenshooter
