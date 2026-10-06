@@ -10,6 +10,9 @@ command: screenshooter
 finish-args:
   # Layer-shell surfaces (overlay above every window, corner thumbnail) need Wayland directly.
   - --socket=wayland
+  # X11 sessions work too: fullscreen selection window and a notification instead of the thumbnail.
+  - --socket=fallback-x11
+  - --share=ipc
   - --device=dri
   # Ctrl+S saves into Pictures/Screenshots. The screenshot portal also drops its temporary
   # frame there, and the app deletes it right after reading.

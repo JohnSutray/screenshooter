@@ -16,7 +16,10 @@ jobs:
   e2e:
     name: e2e (${{ matrix.distro }})
     runs-on: ubuntu-latest
-    container: ${{ matrix.image }}
+    container:
+      image: ${{ matrix.image }}
+      # kwin_wayland carries file capabilities (CAP_SYS_NICE): an unprivileged container can't exec it.
+      options: --privileged
     strategy:
       fail-fast: false
       matrix:
@@ -42,7 +45,7 @@ jobs:
     steps:
       - name: Install dependencies
         run: ${{ matrix.setup }}
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build and install
         run: make PREFIX=/usr && make PREFIX=/usr install
       - name: Unit tests
@@ -56,7 +59,7 @@ jobs:
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
       options: --privileged
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: screenshooter.flatpak
@@ -69,7 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build the package
         run: |
           pacman -Syu --noconfirm --needed base-devel git
@@ -82,7 +85,7 @@ jobs:
           source PKGBUILD
           pacman -S --noconfirm --needed "${depends[@]}" "${makedepends[@]}"
           sudo -u builder env CFLAGS="-march=x86-64 -mtune=generic -O2 -pipe -fno-plt" makepkg -f --noconfirm
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: arch-package
           path: /home/builder/pkg/*.pkg.tar.zst
@@ -94,7 +97,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           path: assets
           merge-multiple: true

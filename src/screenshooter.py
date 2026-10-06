@@ -530,6 +530,10 @@ def copy_to_clipboard(surface):
 def copy_to_clipboard_background(surface):
     """Для снимков без нашего ввода (всего экрана по клавише): GTK-буфер Wayland тогда не примет,
     а wl-copy, который работает через протокол data-control, примет. Кодируем в фоне."""
+    display = Gdk.Display.get_default()
+    if display is not None and display.get_name().startswith(":"):
+        copy_to_clipboard(surface)  # X11: буфер можно занять в любой момент, wl-copy не нужен
+        return
     wl_copy = shutil.which("wl-copy")
     if not wl_copy:
         print("wl-copy not found; the clipboard may stay unchanged", file=sys.stderr)
@@ -1974,7 +1978,8 @@ class App(Gtk.Application):
         prov = Gtk.CssProvider()
         prov.load_from_bytes(GLib.Bytes.new(css))
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        self.layer_shell = LayerShell is not None and not NO_LAYER_SHELL and LayerShell.is_supported()
+        on_x11 = Gdk.Display.get_default().get_name().startswith(":")
+        self.layer_shell = LayerShell is not None and not NO_LAYER_SHELL and not on_x11 and LayerShell.is_supported()
         if not self.layer_shell:
             print("layer-shell unavailable: fullscreen overlay window and notifications instead", file=sys.stderr)
         first_run = not os.path.exists(CONFIG_PATH)
