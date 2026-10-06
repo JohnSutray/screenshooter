@@ -63,12 +63,21 @@ def libdir():
     return os.path.dirname(re.search(r"exec \S+ (\S+)/screenshooter\.py", launcher).group(1) + "/x")
 
 
+last_grab_error = [""]
+
+
 def grab():
-    """(width, height, bytes) of the current frame, through the installed capture helper."""
+    """(width, height, stride, bytes) of the current frame through the installed capture helper,
+    or None while KWin can't provide one yet."""
     rfd, wfd = os.pipe()
     proc = subprocess.Popen([os.path.join(libdir(), "screenshooter-grab")], stdout=wfd, stderr=subprocess.PIPE)
     os.close(wfd)
     meta = proc.stderr.readline().decode().split()
+    if not meta or meta[0] != "META":
+        last_grab_error[0] = " ".join(meta)
+        os.close(rfd)
+        proc.wait()
+        return None
     w, h, stride = int(meta[1]), int(meta[2]), int(meta[3])
     data = bytearray()
     while len(data) < stride * h:
@@ -81,8 +90,15 @@ def grab():
     return w, h, stride, bytes(data)
 
 
+def frame():
+    f = wait_for(grab, 10)
+    if f is None:
+        raise RuntimeError("no frame from KWin: " + last_grab_error[0])
+    return f
+
+
 def mean(region=None):
-    w, h, stride, data = grab()
+    w, h, stride, data = frame()
     x0, y0, x1, y1 = region or (0, 0, w, h)
     vals = []
     for y in range(y0, y1, 7):
@@ -93,7 +109,7 @@ def mean(region=None):
 
 def dark_pixels(region):
     """How many sampled pixels in the region are dark (frames, overlays, editor chrome)."""
-    w, h, stride, data = grab()
+    w, h, stride, data = frame()
     x0, y0, x1, y1 = region
     return sum(1 for y in range(y0, y1, 3) for x in range(x0, x1, 3) if data[y * stride + x * 4 + 1] < 60)
 
@@ -109,8 +125,17 @@ def act(app):
     Gtk.StyleContext.add_provider_for_display(w.get_display(), p, 800)
 a = Gtk.Application(application_id='test.WhiteCanvas'); a.connect('activate', act); a.run([])
 """])
-    w, h, _stride, _data = wait_for(grab, 10)
-    check("capture helper returns a frame", w > 0 and h > 0, "%dx%d" % (w, h))
+    for prop in ("compositingType", "active"):
+        try:
+            v = bus.call_sync("org.kde.KWin", "/Compositor", "org.freedesktop.DBus.Properties", "Get",
+                              GLib.Variant("(ss)", ("org.kde.kwin.Compositing", prop)), None, 0, 3000, None).unpack()[0]
+            print("kwin compositor %s: %s" % (prop, v), flush=True)
+        except Exception as e:
+            print("kwin compositor %s: %s" % (prop, e), flush=True)
+    first = wait_for(grab, 30)
+    if not check("capture helper returns a frame", first is not None, last_grab_error[0]):
+        return finish()
+    w, h = first[0], first[1]
     # With software rendering a new window can take a few seconds to show up.
     base = wait_for(lambda: (lambda m: m if m > 200 else None)(mean()), 20) or mean()
     check("white canvas is visible", base > 200, "mean %.0f" % base)
@@ -149,6 +174,10 @@ a = Gtk.Application(application_id='test.WhiteCanvas'); a.connect('activate', ac
     action("quit")
     daemon.wait(timeout=10)
     canvas.terminate()
+    return finish()
+
+
+def finish():
     result = "FAIL: " + ", ".join(failures) if failures else "PASS"
     print(result, flush=True)
     if os.environ.get("E2E_RESULT"):

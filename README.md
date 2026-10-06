@@ -22,15 +22,30 @@ Snipping tool for **KDE Plasma on Wayland** that works like **Win+Shift+S** on W
 
 ## Install
 
-### Arch Linux, CachyOS, EndeavourOS, Manjaro
+### Flatpak, any distribution
 
-A ready-made package is attached to every [release](https://github.com/JohnSutray/screenshooter/releases):
+Flathub listing is on its way. Until then, every [release](https://github.com/JohnSutray/screenshooter/releases)
+has a Flatpak bundle:
 
 ```bash
-sudo pacman -U https://github.com/JohnSutray/screenshooter/releases/download/v0.1.0/screenshooter-0.1.0-1-x86_64.pkg.tar.zst
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+curl -LO https://github.com/JohnSutray/screenshooter/releases/latest/download/screenshooter.flatpak
+flatpak install --user screenshooter.flatpak
+flatpak run io.github.johnsutray.Screenshooter
 ```
 
-Or build it yourself from the PKGBUILD in this repository:
+On the first start your desktop asks you to confirm the shortcuts and to let the app run in
+the background, so hotkeys keep working after a reboot.
+
+### Arch Linux, CachyOS, EndeavourOS, Manjaro
+
+A native package is attached to every release:
+
+```bash
+sudo pacman -U https://github.com/JohnSutray/screenshooter/releases/download/v0.2.0/screenshooter-0.2.0-1-x86_64.pkg.tar.zst
+```
+
+Or build it from the PKGBUILD in this repository:
 
 ```bash
 git clone https://github.com/JohnSutray/screenshooter
@@ -38,16 +53,15 @@ cd screenshooter/packaging/aur
 makepkg -si
 ```
 
-The package is headed for the AUR as `screenshooter`. AUR account registration is paused
-right now, so it will appear there once registration reopens.
+The package is headed for the AUR as `screenshooter` once AUR account registration reopens.
 
 After installing, run `screenshooter` once, or log out and back in. On the first start it
 registers its global shortcuts in KDE. The keys are taken over from Spectacle if it holds them.
 
 ### From source, for the current user
 
-Needs `python-gobject`, `python-cairo`, `gtk4-layer-shell`, `wl-clipboard`, `python-pillow`,
-a C compiler and `pkg-config`.
+Needs `python-gobject`, `python-cairo`, `gtk4-layer-shell`, `wl-clipboard`, a C compiler,
+`pkg-config` and the GLib headers.
 
 ```bash
 git clone https://github.com/JohnSutray/screenshooter
@@ -77,7 +91,8 @@ In the region overlay, `Esc` or a right click cancels.
 
 ## Configuration
 
-Hotkeys live in `~/.config/screenshooter.conf`:
+Hotkeys live in `~/.config/screenshooter.conf`, or in
+`~/.var/app/io.github.johnsutray.Screenshooter/config/screenshooter.conf` for the Flatpak:
 
 ```ini
 [hotkeys]
@@ -92,6 +107,9 @@ Apply changes with:
 screenshooter install-hotkey
 ```
 
+In the Flatpak and outside KDE, the shortcuts belong to your desktop: the config only gives
+the suggested keys, and you change them later in the desktop's shortcut settings.
+
 F13 to F24 are handled too. The default keymap sends `XF86Launch5` and similar for them,
 and Screenshooter registers whatever your keyboard actually produces.
 
@@ -99,17 +117,30 @@ and Screenshooter registers whatever your keyboard actually produces.
 
 - `src/screenshooter.py`: the whole app in Python, GTK4 and cairo. It runs as a background
   instance, so a hotkey reacts instantly.
-- The region overlay and the thumbnail are layer-shell surfaces, which keeps them above
-  every window.
-- Frames come from KWin's `org.kde.KWin.ScreenShot2` D-Bus interface through a tiny C helper,
-  `src/grab.c`. KWin leaves the requesting client's own windows out of a screenshot. A separate
-  process is what lets the editor appear in your next capture.
-- Global shortcuts are registered with KDE's `kglobalaccel` over D-Bus, the same way System
-  Settings does it.
+- **Capture.** On KDE outside Flatpak, frames come straight from KWin's `org.kde.KWin.ScreenShot2`
+  through a tiny C helper, `src/grab.c`, in about 50 ms. KWin leaves the requesting client's own
+  windows out of a screenshot, and the separate process lets the editor appear in your next capture.
+  Everywhere else the xdg-desktop-portal Screenshot interface is used, in about 0.3 s.
+- **Hotkeys.** On KDE outside Flatpak, KDE's `kglobalaccel` over D-Bus, the same way System Settings
+  does it. Everywhere else the GlobalShortcuts portal.
+- **Overlay and thumbnail** are layer-shell surfaces, which keeps them above every window. Where
+  layer-shell is missing, as on GNOME or in X11 sessions, the selection opens as a fullscreen window
+  and a notification replaces the thumbnail.
+- Everything above is picked at runtime by checking what the session offers, not its version.
 
 ## Requirements
 
-KDE Plasma 6 on Wayland. Other desktops lack the KWin screenshot interface and `kglobalaccel`.
+Best on KDE Plasma 6 with Wayland. Other desktops need xdg-desktop-portal with the Screenshot
+and GlobalShortcuts interfaces, for example GNOME 48 or later and Hyprland.
+
+## Development
+
+```bash
+make check            # unit tests, no display needed
+tests/run-e2e.sh      # the installed app inside a headless KWin: overlay, thumbnail, clipboard, editor
+```
+
+CI runs both on Arch, Fedora and Ubuntu, and builds the Flatpak.
 
 ## License
 

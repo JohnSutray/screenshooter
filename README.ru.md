@@ -22,12 +22,27 @@
 
 ## Установка
 
-### Arch Linux, CachyOS, EndeavourOS, Manjaro
+### Flatpak, любой дистрибутив
 
-Готовый пакет приложен к каждому [релизу](https://github.com/JohnSutray/screenshooter/releases):
+Страница на Flathub готовится. Пока что к каждому [релизу](https://github.com/JohnSutray/screenshooter/releases)
+приложен Flatpak-бандл:
 
 ```bash
-sudo pacman -U https://github.com/JohnSutray/screenshooter/releases/download/v0.1.0/screenshooter-0.1.0-1-x86_64.pkg.tar.zst
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+curl -LO https://github.com/JohnSutray/screenshooter/releases/latest/download/screenshooter.flatpak
+flatpak install --user screenshooter.flatpak
+flatpak run io.github.johnsutray.Screenshooter
+```
+
+При первом запуске рабочий стол попросит подтвердить горячие клавиши и разрешить работу в фоне,
+чтобы клавиши срабатывали и после перезагрузки.
+
+### Arch Linux, CachyOS, EndeavourOS, Manjaro
+
+Родной пакет приложен к каждому релизу:
+
+```bash
+sudo pacman -U https://github.com/JohnSutray/screenshooter/releases/download/v0.2.0/screenshooter-0.2.0-1-x86_64.pkg.tar.zst
 ```
 
 Или собери сам из PKGBUILD в этом репозитории:
@@ -38,16 +53,15 @@ cd screenshooter/packaging/aur
 makepkg -si
 ```
 
-Пакет готовится к публикации в AUR под именем `screenshooter`. Регистрация в AUR сейчас
-приостановлена, поэтому он появится там, когда её откроют.
+Пакет появится в AUR под именем `screenshooter`, когда там снова откроют регистрацию.
 
 После установки один раз запусти `screenshooter` или перезайди в сеанс. При первом запуске
 программа сама назначит глобальные клавиши в KDE и заберёт их у Spectacle, если они были заняты им.
 
 ### Из исходников, для текущего пользователя
 
-Нужны `python-gobject`, `python-cairo`, `gtk4-layer-shell`, `wl-clipboard`, `python-pillow`,
-компилятор C и `pkg-config`.
+Нужны `python-gobject`, `python-cairo`, `gtk4-layer-shell`, `wl-clipboard`, компилятор C,
+`pkg-config` и заголовки GLib.
 
 ```bash
 git clone https://github.com/JohnSutray/screenshooter
@@ -77,7 +91,8 @@ cd screenshooter
 
 ## Настройка
 
-Клавиши лежат в `~/.config/screenshooter.conf`:
+Клавиши лежат в `~/.config/screenshooter.conf`, а у Flatpak-версии в
+`~/.var/app/io.github.johnsutray.Screenshooter/config/screenshooter.conf`:
 
 ```ini
 [hotkeys]
@@ -92,23 +107,40 @@ fullscreen = Shift+Print
 screenshooter install-hotkey
 ```
 
+Во Flatpak и вне KDE клавишами распоряжается рабочий стол. Конфиг задаёт только предлагаемые
+сочетания, а менять их потом нужно в настройках клавиш рабочего стола.
+
 F13–F24 тоже поддерживаются. В стандартной раскладке они выдают `XF86Launch5` и подобное,
 и Screenshooter регистрирует то, что реально приходит с клавиатуры.
 
 ## Как устроено
 
-- `src/screenshooter.py`: всё приложение на Python, GTK4 и cairo. Работает фоновым
-  экземпляром, поэтому реакция на клавишу мгновенная.
-- Оверлей выделения и миниатюра сделаны поверхностями layer-shell, поэтому они поверх всех окон.
-- Кадр приходит из D-Bus-интерфейса KWin `org.kde.KWin.ScreenShot2` через маленький помощник
-  на C, `src/grab.c`. KWin не включает в снимок окна того, кто его запросил. Отдельный процесс
-  нужен, чтобы редактор попадал в следующий снимок.
-- Глобальные клавиши регистрируются в `kglobalaccel` KDE по D-Bus, так же как это делают
-  Параметры системы.
+- `src/screenshooter.py`: всё приложение на Python, GTK4 и cairo. Работает фоновым экземпляром,
+  поэтому реакция на клавишу мгновенная.
+- **Снимок.** В KDE вне Flatpak кадр приходит прямо из `org.kde.KWin.ScreenShot2` через маленький
+  помощник на C, `src/grab.c`, примерно за 50 мс. KWin не включает в снимок окна того, кто его
+  запросил, а отдельный процесс нужен, чтобы редактор попадал в следующий снимок. Во всех остальных случаях
+  используется портал xdg-desktop-portal Screenshot, примерно 0,3 с.
+- **Горячие клавиши.** В KDE вне Flatpak через `kglobalaccel` по D-Bus, так же как это делают
+  Параметры системы. Во всех остальных случаях через портал GlobalShortcuts.
+- **Оверлей и миниатюра** сделаны поверхностями layer-shell, поэтому они поверх всех окон. Где
+  layer-shell нет, например в GNOME или в сеансе X11, выделение открывается полноэкранным окном,
+  а вместо миниатюры приходит уведомление.
+- Всё это выбирается при запуске по тому, что умеет сеанс, а не по номерам версий.
 
 ## Требования
 
-KDE Plasma 6 на Wayland. В других окружениях нет интерфейса снимков KWin и `kglobalaccel`.
+Лучше всего на KDE Plasma 6 с Wayland. Другим окружениям нужен xdg-desktop-portal с интерфейсами
+Screenshot и GlobalShortcuts, например GNOME 48 и новее или Hyprland.
+
+## Разработка
+
+```bash
+make check            # юнит-тесты, экран не нужен
+tests/run-e2e.sh      # установленное приложение в KWin без экрана: оверлей, миниатюра, буфер, редактор
+```
+
+CI гоняет оба набора тестов на Arch, Fedora и Ubuntu и собирает Flatpak.
 
 ## Лицензия
 

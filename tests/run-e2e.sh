@@ -21,7 +21,11 @@ dbus-run-session -- kwin_wayland --virtual --no-lockscreen --width 1280 --height
 
 if [[ -s $E2E_RESULT ]]; then
     cat "$E2E_RESULT"
-    [[ $(cat "$E2E_RESULT") == PASS ]]
+    if [[ $(cat "$E2E_RESULT") != PASS ]]; then
+        echo "--- KWin log:" >&2
+        tail -40 "$work/kwin.log" >&2
+        exit 1
+    fi
 else
     echo "e2e did not finish; KWin log:" >&2
     tail -40 "$work/kwin.log" >&2
