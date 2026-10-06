@@ -81,6 +81,8 @@ IN_FLATPAK = os.path.exists("/.flatpak-info")
 # SCREENSHOOTER_NO_LAYER_SHELL=1 включает запасной путь без layer-shell.
 FORCE_PORTAL = os.environ.get("SCREENSHOOTER_BACKEND") == "portal"
 NO_LAYER_SHELL = os.environ.get("SCREENSHOOTER_NO_LAYER_SHELL") == "1"
+# Сквозные тесты в CI: там KWin рисует без OpenGL и снимать экран не умеет, кадр даёт тест.
+TEST_FRAME = os.environ.get("SCREENSHOOTER_TEST_FRAME")
 MIN_GTK = (4, 12)
 
 
@@ -752,6 +754,9 @@ class Capture:
     @classmethod
     def grab_async(cls, done, failed):
         """done(capture) или failed(message|None). KWin отвечает сразу, портал — асинхронно."""
+        if TEST_FRAME:
+            done(cls.from_png(TEST_FRAME))
+            return
         if kde_capture_available():
             try:
                 done(cls.grab_kde())
