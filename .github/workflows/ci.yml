@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The real app inside a headless KWin on several distributions: overlay, thumbnail,
+  # clipboard, editor and hotkey registration, all checked on real frames.
+  e2e:
+    name: e2e (${{ matrix.distro }})
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: arch
+            image: archlinux:latest
+            setup: >-
+              pacman -Syu --noconfirm --needed base-devel pkgconf python python-gobject python-cairo
+              gtk4 gtk4-layer-shell glib2 libxkbcommon wl-clipboard kwin kconfig dbus mesa ttf-dejavu which
+          - distro: fedora
+            image: fedora:latest
+            setup: >-
+              dnf -y install gcc make pkgconf-pkg-config glib2-devel python3 python3-gobject python3-cairo
+              gtk4 gtk4-layer-shell libxkbcommon wl-clipboard kwin-wayland kf6-kconfig dbus-daemon dbus-tools
+              mesa-dri-drivers dejavu-sans-fonts which
+          - distro: ubuntu
+            image: ubuntu:26.04
+            setup: >-
+              apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+              build-essential pkg-config libglib2.0-dev python3 python3-gi python3-gi-cairo gir1.2-gtk-4.0
+              gir1.2-gtk4layershell-1.0 libgtk4-layer-shell0 libxkbcommon0 wl-clipboard kwin-wayland
+              libkf6config-bin dbus dbus-bin libgl1-mesa-dri fonts-dejavu-core
+    steps:
+      - name: Install dependencies
+        run: ${{ matrix.setup }}
+      - uses: actions/checkout@v4
+      - name: Build and install
+        run: make PREFIX=/usr && make PREFIX=/usr install
+      - name: Unit tests
+        run: make PREFIX=/usr check
+      - name: End-to-end test in a virtual KWin
+        run: tests/run-e2e.sh
+
+  flatpak:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: screenshooter.flatpak
+          manifest-path: packaging/flatpak/io.github.johnsutray.Screenshooter.yml
+          cache-key: flatpak-builder-${{ github.sha }}
+
+  # Release assets for tags: a generic x86-64 Arch package (not tuned to the build machine).
+  arch-package:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the package
+        run: |
+          pacman -Syu --noconfirm --needed base-devel git
+          useradd -m builder
+          cp -r packaging/aur /home/builder/pkg && chown -R builder /home/builder/pkg
+          cd /home/builder/pkg
+          # The checksum of a tag's tarball can only be pinned after the tag exists.
+          sed -i "s/^sha256sums=.*/sha256sums=('SKIP')/" PKGBUILD
+          sed -i "s/^pkgver=.*/pkgver=${GITHUB_REF_NAME#v}/" PKGBUILD
+          source PKGBUILD
+          pacman -S --noconfirm --needed "${depends[@]}" "${makedepends[@]}"
+          sudo -u builder env CFLAGS="-march=x86-64 -mtune=generic -O2 -pipe -fno-plt" makepkg -f --noconfirm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: /home/builder/pkg/*.pkg.tar.zst
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [e2e, flatpak, arch-package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Attach to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la assets
+          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --title "Screenshooter ${GITHUB_REF_NAME#v}" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --clobber assets/*.flatpak assets/*.pkg.tar.zst
