@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>@ID@</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <name>Screenshooter</name>
+  <name xml:lang="ru">Screenshooter</name>
+  <summary>Snip a screen region and annotate it</summary>
+  <summary xml:lang="ru">Снимок области экрана с пометками</summary>
+
+  <developer id="io.github.johnsutray">
+    <name>Andy</name>
+  </developer>
+
+  <description>
+    <p>
+      Screenshooter works like Win+Shift+S on Windows. Press the hotkey, the screen freezes,
+      drag a region and the screenshot is already in your clipboard. A thumbnail pops up in the
+      corner: click it to draw on the screenshot.
+    </p>
+    <ul>
+      <li>Region and whole-screen capture straight to the clipboard</li>
+      <li>Pen, arrow, rectangle, ellipse and text, any color and line width</li>
+      <li>Select, move, resize and delete anything you drew, with undo and redo</li>
+      <li>Draw outside the image: the extra space is kept only where you drew</li>
+      <li>Cut a piece out of a screenshot right in the editor</li>
+    </ul>
+    <p>
+      Made for KDE Plasma on Wayland. On other desktops the selection opens as a fullscreen
+      window and a notification replaces the thumbnail.
+    </p>
+    <p xml:lang="ru">
+      Screenshooter работает как Win+Shift+S в Windows. Нажмите клавишу, экран замрёт,
+      выделите область, и снимок уже в буфере обмена. В углу появится миниатюра: нажмите на неё,
+      чтобы порисовать на снимке.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">@ID@.desktop</launchable>
+  <provides>
+    <binary>screenshooter</binary>
+  </provides>
+
+  <url type="homepage">https://github.com/JohnSutray/screenshooter</url>
+  <url type="bugtracker">https://github.com/JohnSutray/screenshooter/issues</url>
+  <url type="vcs-browser">https://github.com/JohnSutray/screenshooter</url>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>Annotating a screenshot</caption>
+      <image>https://raw.githubusercontent.com/JohnSutray/screenshooter/v@VERSION@/docs/editor.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The result keeps drawings made outside the image</caption>
+      <image>https://raw.githubusercontent.com/JohnSutray/screenshooter/v@VERSION@/docs/editor-export.png</image>
+    </screenshot>
+  </screenshots>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#8ec5ff</color>
+    <color type="primary" scheme_preference="dark">#1a3a66</color>
+  </branding>
+
+  <content_rating type="oars-1.1"/>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+
+  <categories>
+    <category>Utility</category>
+    <category>Graphics</category>
+  </categories>
+  <keywords>
+    <keyword>screenshot</keyword>
+    <keyword>snipping tool</keyword>
+    <keyword>annotate</keyword>
+  </keywords>
+
+  <releases>
+    <release version="0.2.0" date="2026-10-07">
+      <description>
+        <p>Works beyond KDE and inside Flatpak:</p>
+        <ul>
+          <li>Screenshots and hotkeys go through desktop portals when KWin's own interfaces are unavailable</li>
+          <li>Fallback without layer-shell: fullscreen selection window and a notification instead of the thumbnail</li>
+          <li>Fewer dependencies: Pillow and Spectacle are no longer needed</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.1.0" date="2026-10-05">
+      <description>
+        <p>First public release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

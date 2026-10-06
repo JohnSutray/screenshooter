@@ -1,0 +1,64 @@
+# Flatpak manifest for local and CI builds (sources come from this checkout).
+#   flatpak run org.flatpak.Builder --user --install --force-clean build-dir \
+#       packaging/flatpak/io.github.johnsutray.Screenshooter.yml
+# packaging/flathub/ holds the same manifest pinned to a release tag for Flathub.
+id: io.github.johnsutray.Screenshooter
+runtime: org.gnome.Platform
+runtime-version: '51'
+sdk: org.gnome.Sdk
+command: screenshooter
+finish-args:
+  # Layer-shell surfaces (overlay above every window, corner thumbnail) need Wayland directly.
+  - --socket=wayland
+  - --device=dri
+  # Ctrl+S saves into Pictures/Screenshots. The screenshot portal also drops its temporary
+  # frame there, and the app deletes it right after reading.
+  - --filesystem=xdg-pictures
+modules:
+  - name: gtk4-layer-shell
+    buildsystem: meson
+    config-opts:
+      - -Dexamples=false
+      - -Ddocs=false
+      - -Dtests=false
+      - -Dsmoke-tests=false
+      - -Dvapi=false
+    sources:
+      - type: git
+        url: https://github.com/wmww/gtk4-layer-shell.git
+        tag: v1.3.0
+        commit: 1c963c51514581c41b9bdae08cdf69171265cdda
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /share/gir-1.0
+
+  # wl-copy puts a whole-screen capture into the clipboard: without a click or key press of our
+  # own, Wayland only accepts clipboard data through the data-control protocol.
+  - name: wl-clipboard
+    buildsystem: meson
+    config-opts:
+      - -Dzshcompletiondir=no
+      - -Dfishcompletiondir=no
+    sources:
+      - type: git
+        url: https://github.com/bugaevc/wl-clipboard.git
+        tag: v2.3.0
+        commit: 67a7b937895bceec1ae5ccebb10216f63f70ca1b
+    cleanup:
+      - /share/man
+      - /share/bash-completion
+      - /bin/wl-paste
+
+  - name: screenshooter
+    buildsystem: simple
+    build-commands:
+      - make PREFIX=/app FLATPAK=1 PYTHON=/usr/bin/python3
+      - make PREFIX=/app FLATPAK=1 PYTHON=/usr/bin/python3 install
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - build
+          - build-dir
+          - .flatpak-builder

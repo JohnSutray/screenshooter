@@ -16,12 +16,11 @@ depends=(
   'python'
   'python-cairo'
   'python-gobject'
-  'python-pillow'
   'wl-clipboard'
 )
 makedepends=('pkgconf')
 optdepends=(
-  'spectacle: fallback capture method'
+  'xdg-desktop-portal: capture and hotkeys outside KDE'
   'xdg-user-dirs: save into the localized Pictures folder'
 )
 install=screenshooter.install

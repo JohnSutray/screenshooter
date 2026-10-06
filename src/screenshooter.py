@@ -13,9 +13,9 @@ import datetime
 import io
 import math
 import os
+import shutil
 import subprocess
 import sys
-import tempfile
 import threading
 
 # Обёртка (bin/screenshooter) подгружает libgtk4-layer-shell через LD_PRELOAD: библиотека
@@ -25,6 +25,31 @@ if os.environ.get("SCREENSHOOTER_PRELOAD") and os.environ.get("LD_PRELOAD") == o
     del os.environ["LD_PRELOAD"]
 os.environ.pop("SCREENSHOOTER_PRELOAD", None)
 
+APP_ID = "io.github.johnsutray.Screenshooter"
+
+
+def register_with_portal():
+    """Вне Flatpak портал не знает, кто мы: представляемся сами (xdg-desktop-portal ≥ 1.19).
+
+    Звать до импорта Gtk: PyGObject инициализирует GTK 4 прямо при импорте, GTK тут же
+    обращается к порталу, и соединение навсегда остаётся с пустым app ID.
+    """
+    if os.path.exists("/.flatpak-info"):
+        return
+    try:
+        from gi.repository import Gio as _Gio, GLib as _GLib
+
+        _Gio.bus_get_sync(_Gio.BusType.SESSION).call_sync(
+            "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop", "org.freedesktop.host.portal.Registry",
+            "Register", _GLib.Variant("(sa{sv})", (APP_ID, {})), None, _Gio.DBusCallFlags.NONE, 3000, None,
+        )
+    except Exception as e:
+        print("portal registry unavailable:", e, file=sys.stderr)
+
+
+if __name__ == "__main__":
+    register_with_portal()
+
 import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
@@ -33,14 +58,16 @@ gi.require_version("Gsk", "4.0")
 gi.require_version("Graphene", "1.0")
 gi.require_version("Pango", "1.0")
 gi.require_version("PangoCairo", "1.0")
-gi.require_version("Gtk4LayerShell", "1.0")
 
 import cairo  # noqa: E402
 from gi.repository import Gdk, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pango, PangoCairo  # noqa: E402
-from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
+try:
+    gi.require_version("Gtk4LayerShell", "1.0")
+    from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
+except (ValueError, ImportError):
+    LayerShell = None  # без layer-shell работаем запасным путём (окно на весь экран + уведомление)
 
-VERSION = "0.1.0"
-APP_ID = "io.github.johnsutray.Screenshooter"
+VERSION = "0.2.0"
 DESKTOP_ID = APP_ID + ".desktop"
 DESKTOP_ID_FULL = APP_ID + "-fullscreen.desktop"  # отдельный desktop-файл: kglobalaccel кэширует файл компонента
 
@@ -48,6 +75,13 @@ CONFIG_PATH = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expandus
 # Помощник для снимка (см. grab.c) лежит рядом со скриптом: KWin не включает в кадр окна
 # самого запросившего процесса.
 GRAB_HELPER = os.path.join(os.path.dirname(os.path.realpath(__file__)), "screenshooter-grab")
+
+IN_FLATPAK = os.path.exists("/.flatpak-info")
+# Для тестов и отладки: SCREENSHOOTER_BACKEND=portal всегда идёт через порталы,
+# SCREENSHOOTER_NO_LAYER_SHELL=1 включает запасной путь без layer-shell.
+FORCE_PORTAL = os.environ.get("SCREENSHOOTER_BACKEND") == "portal"
+NO_LAYER_SHELL = os.environ.get("SCREENSHOOTER_NO_LAYER_SHELL") == "1"
+MIN_GTK = (4, 12)
 
 
 # --------------------------------------------------------------------------- i18n
@@ -96,7 +130,6 @@ _RU = {
     "Save to the Screenshots folder (Ctrl+S)": "В папку «Снимки экрана» (Ctrl+S)",
     "Drag window": "Перетащить окно",
     "✓ Copied to clipboard": "✓ Скопировано в буфер обмена",
-    "Couldn't copy": "Не удалось скопировать",
     "✓ Saved: %s": "✓ Сохранено: %s",
     "Save failed: %s": "Ошибка сохранения: %s",
     "Couldn't take a screenshot: %s": "Не удалось сделать снимок экрана: %s",
@@ -107,6 +140,13 @@ _RU = {
     "%s — %s: assigned": "%s — %s: назначена",
     "%s — %s: NOT assigned (%r)": "%s — %s: НЕ назначена (%r)",
     "Hotkeys removed.": "Горячие клавиши сняты.",
+    "Screenshot copied": "Снимок скопирован",
+    "Click to annotate": "Нажмите, чтобы порисовать",
+    "Keep running so screenshot hotkeys react instantly": "Работать в фоне, чтобы клавиши снимков срабатывали мгновенно",
+    "Shortcuts are managed by your desktop: change or remove them in System Settings.":
+        "Клавишами управляет рабочий стол: менять и удалять их нужно в Параметрах системы.",
+    "Shortcuts requested from the desktop; confirm them if it asks.":
+        "Клавиши запрошены у рабочего стола; подтвердите, если он спросит.",
 }
 _TR = _RU if _ui_lang() == "ru" else {}
 
@@ -147,14 +187,13 @@ _XF86_TO_QT = {
 }
 
 
-def physical_fkey_qt(n):
-    """Qt-код для физической клавиши F13–F24.
+def physical_fkey_name(n):
+    """Имя keysym, которое физическая клавиша F13–F24 выдаёт в раскладке по умолчанию.
 
     В раскладке xkb (symbols/inet) клавиши FK13–FK18 выдают не F13–F18, а XF86Tools, XF86Launch5…
-    KWin сравнивает глобальные шорткаты по keysym, поэтому «F15» в конфиге должна превращаться
-    в то, что реально приходит с клавиатуры (Qt::Key_Launch8 для XF86Launch6).
+    Композиторы сравнивают глобальные шорткаты по keysym, поэтому «F15» в конфиге должна
+    превращаться в то, что реально приходит с клавиатуры.
     """
-    plain = 0x01000030 + n - 1
     try:
         import ctypes
 
@@ -173,10 +212,16 @@ def physical_fkey_qt(n):
         sym = x.xkb_state_key_get_one_sym(st, keycode)
         buf = ctypes.create_string_buffer(64)
         x.xkb_keysym_get_name(sym, buf, 64)
-        name = buf.value.decode()
+        return buf.value.decode() or "F%d" % n
     except Exception as e:
         print("xkbcommon unavailable (%s), treating F%d as a plain F-key" % (e, n), file=sys.stderr)
-        return plain
+        return "F%d" % n
+
+
+def physical_fkey_qt(n):
+    """Qt-код для физической клавиши F13–F24 (для kglobalaccel)."""
+    plain = 0x01000030 + n - 1
+    name = physical_fkey_name(n)
     if name == "F%d" % n:
         return plain
     if name in _XF86_TO_QT:
@@ -210,6 +255,49 @@ def parse_qt_key(text):
     else:
         raise ValueError("unknown key %r" % key)
     return code
+
+
+# Имена keysym для клавиш из _QT_KEYS — для формата триггеров портала GlobalShortcuts.
+_XDG_KEYS = {
+    "escape": "Escape", "esc": "Escape", "tab": "Tab", "backspace": "BackSpace", "return": "Return", "enter": "Return",
+    "insert": "Insert", "ins": "Insert", "delete": "Delete", "del": "Delete", "pause": "Pause", "print": "Print",
+    "sysreq": "Sys_Req", "home": "Home", "end": "End", "left": "Left", "up": "Up", "right": "Right", "down": "Down",
+    "pageup": "Page_Up", "pgup": "Page_Up", "pagedown": "Page_Down", "pgdown": "Page_Down", "space": "space",
+    "menu": "Menu", "scrolllock": "Scroll_Lock", "numlock": "Num_Lock",
+}
+_XDG_MODS = {"meta": "LOGO", "win": "LOGO", "super": "LOGO", "ctrl": "CTRL", "control": "CTRL", "alt": "ALT", "shift": "SHIFT"}
+
+
+def xdg_trigger(text):
+    """'Meta+Shift+S' → 'LOGO+SHIFT+s' (формат preferred_trigger портала GlobalShortcuts)."""
+    parts = [p.strip() for p in text.replace(" ", "").split("+") if p.strip()]
+    if not parts:
+        raise ValueError("empty key combination")
+    mods = []
+    for mod in parts[:-1]:
+        if mod.lower() not in _XDG_MODS:
+            raise ValueError("unknown modifier %r" % mod)
+        mods.append(_XDG_MODS[mod.lower()])
+    key = parts[-1]
+    kl = key.lower()
+    if kl in _XDG_KEYS:
+        name = _XDG_KEYS[kl]
+    elif len(kl) > 1 and kl[0] == "f" and kl[1:].isdigit() and 13 <= int(kl[1:]) <= 24:
+        name = physical_fkey_name(int(kl[1:]))
+    elif len(kl) > 1 and kl[0] == "f" and kl[1:].isdigit() and 1 <= int(kl[1:]) <= 35:
+        name = "F%d" % int(kl[1:])
+    elif len(key) == 1:
+        name = kl
+    else:
+        raise ValueError("unknown key %r" % key)
+    return "+".join(mods + [name])
+
+
+def write_default_config():
+    if not os.path.exists(CONFIG_PATH):
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            f.write(DEFAULT_CONFIG)
 
 
 def load_hotkeys():
@@ -427,53 +515,34 @@ def surface_to_png(surface):
     return bio.getvalue()
 
 
-def copy_to_clipboard(surface, png_bytes=None):
-    """Кладёт картинку в буфер обмена. Возвращает True при успехе."""
+def copy_to_clipboard(surface):
+    """Кладёт картинку в буфер обмена через GTK.
+
+    Работает, только пока у нас свежее событие ввода (клик, клавиша): так устроен Wayland.
+    PNG и другие форматы GTK кодирует сам, лениво и в фоновом потоке, когда их попросят.
+    """
     # Тип значения должен быть ровно Gdk.Texture (не MemoryTexture): сериализаторы
     # image/png и т.п. GTK ищет по точному GType.
     value = GObject.Value(Gdk.Texture, surface_to_texture(surface))
-    providers = [Gdk.ContentProvider.new_for_value(value)]
-    if png_bytes is not None:
-        providers.insert(0, Gdk.ContentProvider.new_for_bytes("image/png", GLib.Bytes.new(png_bytes)))
-    provider = providers[0] if len(providers) == 1 else Gdk.ContentProvider.new_union(providers)
-    clipboard = Gdk.Display.get_default().get_clipboard()
-    try:
-        if clipboard.set_content(provider):
-            return True
-    except Exception as e:  # pragma: no cover
-        print("clipboard set_content failed:", e, file=sys.stderr)
-    # Запасной путь: wl-copy сам форкается в фон и держит selection.
-    try:
-        data = png_bytes if png_bytes is not None else surface_to_png(surface)
-        subprocess.run(["wl-copy", "-t", "image/png"], input=data, check=True, timeout=5)
-        return True
-    except Exception as e:
-        print("wl-copy failed:", e, file=sys.stderr)
-        return False
-
-
-def surface_to_png_fast(surface):
-    """PNG через PIL: быстрее cairo и отпускает GIL — можно кодировать в фоне."""
-    try:
-        from PIL import Image
-    except ImportError:
-        return surface_to_png(surface)
-    surface.flush()
-    w, h = surface.get_width(), surface.get_height()
-    img = Image.frombuffer("RGBA", (w, h), bytes(surface.get_data()), "raw", "BGRA", surface.get_stride(), 1).convert("RGB")
-    bio = io.BytesIO()
-    img.save(bio, format="PNG", compress_level=1)
-    return bio.getvalue()
+    Gdk.Display.get_default().get_clipboard().set_content(Gdk.ContentProvider.new_for_value(value))
 
 
 def copy_to_clipboard_background(surface):
-    """Для случаев без окна в фокусе (снимок всего экрана): GTK-буфер Wayland тогда не примет,
-    а wl-copy примет. Кодируем и отдаём в фоне, чтобы миниатюра появилась сразу."""
+    """Для снимков без нашего ввода (всего экрана по клавише): GTK-буфер Wayland тогда не примет,
+    а wl-copy, который работает через протокол data-control, примет. Кодируем в фоне."""
+    wl_copy = shutil.which("wl-copy")
+    if not wl_copy:
+        print("wl-copy not found; the clipboard may stay unchanged", file=sys.stderr)
+        copy_to_clipboard(surface)
+        return
+    texture = surface_to_texture(surface)
 
     def work():
         try:
-            data = surface_to_png_fast(surface)
-            subprocess.run(["wl-copy", "-t", "image/png"], input=data, check=True, timeout=10)
+            data = texture.save_to_png_bytes().get_data()  # GTK отпускает GIL, интерфейс не замирает
+            # wl-copy уходит в фон держать буфер: не отдаём ему наши stdout/stderr.
+            subprocess.run([wl_copy, "-t", "image/png"], input=data, check=True, timeout=10,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as e:
             print("wl-copy failed:", e, file=sys.stderr)
 
@@ -498,6 +567,71 @@ def save_png(png_bytes):
     with open(path, "wb") as f:
         f.write(png_bytes)
     return path
+
+
+# --------------------------------------------------------------------------- D-Bus and portals
+
+PORTAL_BUS = "org.freedesktop.portal.Desktop"
+PORTAL_PATH = "/org/freedesktop/portal/desktop"
+_portal_counter = [0]
+
+
+def session_bus():
+    return Gio.bus_get_sync(Gio.BusType.SESSION)
+
+
+def bus_has_owner(name):
+    try:
+        res = session_bus().call_sync(
+            "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "NameHasOwner",
+            GLib.Variant("(s)", (name,)), GLib.VariantType.new("(b)"), Gio.DBusCallFlags.NONE, 1000, None,
+        )
+        return res.unpack()[0]
+    except Exception:
+        return False
+
+
+def kde_capture_available():
+    """Быстрый снимок через KWin: только вне песочницы и только в KDE."""
+    return not IN_FLATPAK and not FORCE_PORTAL and bus_has_owner("org.kde.KWin")
+
+
+def kde_hotkeys_available():
+    return not IN_FLATPAK and not FORCE_PORTAL and bus_has_owner("org.kde.kglobalaccel")
+
+
+def portal_request(iface, method, signature, args, options, callback):
+    """Вызов метода портала, который отвечает сигналом Response. callback(code, results):
+    code 0 — успех, 1 — пользователь отказался, 2 — ошибка."""
+    bus = session_bus()
+    _portal_counter[0] += 1
+    token = "screenshooter%d_%d" % (os.getpid(), _portal_counter[0])
+    sender = bus.get_unique_name()[1:].replace(".", "_")
+    handle = "%s/request/%s/%s" % (PORTAL_PATH, sender, token)
+    sub = [0]
+
+    def on_response(_conn, _sender, _path, _iface, _signal, params):
+        bus.signal_unsubscribe(sub[0])
+        code, results = params.unpack()
+        callback(code, results)
+
+    sub[0] = bus.signal_subscribe(
+        PORTAL_BUS, "org.freedesktop.portal.Request", "Response", handle, None, Gio.DBusSignalFlags.NONE, on_response
+    )
+    opts = dict(options)
+    opts["handle_token"] = GLib.Variant("s", token)
+
+    def on_reply(conn, res):
+        try:
+            conn.call_finish(res)
+        except Exception as e:
+            bus.signal_unsubscribe(sub[0])
+            callback(2, {"error": str(e)})
+
+    bus.call(
+        PORTAL_BUS, PORTAL_PATH, iface, method, GLib.Variant(signature, tuple(args) + (opts,)),
+        None, Gio.DBusCallFlags.NONE, -1, None, on_reply,
+    )
 
 
 # --------------------------------------------------------------------------- capture
@@ -602,32 +736,54 @@ class Capture:
         return cls(buf, w, h, stride, fmt, scale)
 
     @classmethod
-    def grab(cls, include_cursor=False):
-        """Лучший доступный способ: помощник → KWin напрямую → spectacle."""
+    def grab_kde(cls, include_cursor=False):
+        """Быстрый путь KDE: помощник (в кадр попадают и наши окна), иначе KWin из этого процесса."""
         if os.access(GRAB_HELPER, os.X_OK):
             try:
                 return cls.from_helper(include_cursor)
             except Exception as e:
                 print("grab helper failed, capturing in-process:", e, file=sys.stderr)
-        try:
-            return cls.from_kwin(include_cursor)
-        except Exception as e:
-            print("KWin capture failed, falling back to spectacle:", e, file=sys.stderr)
-            return cls.from_spectacle()
+        return cls.from_kwin(include_cursor)
 
     @classmethod
-    def from_spectacle(cls):
-        """Запасной путь, если KWin не дал снимать напрямую."""
-        fd, path = tempfile.mkstemp(prefix="screenshooter-", suffix=".png")
-        os.close(fd)
-        try:
-            subprocess.run(["spectacle", "-b", "-n", "-f", "-o", path], check=True, timeout=15)
-            src = cairo.ImageSurface.create_from_png(path)
-        finally:
+    def grab_async(cls, done, failed):
+        """done(capture) или failed(message|None). KWin отвечает сразу, портал — асинхронно."""
+        if kde_capture_available():
             try:
-                os.unlink(path)
-            except OSError:
-                pass
+                done(cls.grab_kde())
+                return
+            except Exception as e:
+                print("KWin capture failed, trying the portal:", e, file=sys.stderr)
+
+        def on_response(code, results):
+            if code != 0:
+                failed(None if code == 1 else results.get("error", "screenshot portal error %d" % code))
+                return
+            path = GLib.filename_from_uri(results["uri"])[0]
+            cap = err = None
+            try:
+                cap = cls.from_png(path)
+            except Exception as e:
+                err = str(e)
+            finally:
+                # Портал сохраняет файл в «Изображения»: это наш временный кадр, убираем.
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+            if cap is None:
+                failed(err)
+            else:
+                done(cap)
+
+        portal_request(
+            "org.freedesktop.portal.Screenshot", "Screenshot", "(sa{sv})", ("",),
+            {"interactive": GLib.Variant("b", False)}, on_response,
+        )
+
+    @classmethod
+    def from_png(cls, path):
+        src = cairo.ImageSurface.create_from_png(path)
         w, h = src.get_width(), src.get_height()
         dst = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
         cr = cairo.Context(dst)
@@ -796,14 +952,19 @@ class Overlay(Gtk.Window):
         self.origin = (geo.x, geo.y)
         self.monitor = monitor
 
-        LayerShell.init_for_window(self)
-        LayerShell.set_namespace(self, "screenshooter-select")
-        LayerShell.set_layer(self, LayerShell.Layer.OVERLAY)
-        for edge in (LayerShell.Edge.TOP, LayerShell.Edge.BOTTOM, LayerShell.Edge.LEFT, LayerShell.Edge.RIGHT):
-            LayerShell.set_anchor(self, edge, True)
-        LayerShell.set_exclusive_zone(self, -1)
-        LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.EXCLUSIVE)
-        LayerShell.set_monitor(self, monitor)
+        if app.layer_shell:
+            LayerShell.init_for_window(self)
+            LayerShell.set_namespace(self, "screenshooter-select")
+            LayerShell.set_layer(self, LayerShell.Layer.OVERLAY)
+            for edge in (LayerShell.Edge.TOP, LayerShell.Edge.BOTTOM, LayerShell.Edge.LEFT, LayerShell.Edge.RIGHT):
+                LayerShell.set_anchor(self, edge, True)
+            LayerShell.set_exclusive_zone(self, -1)
+            LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.EXCLUSIVE)
+            LayerShell.set_monitor(self, monitor)
+        else:
+            # Запасной путь (например, GNOME): обычное окно на весь экран нужного монитора.
+            self.set_decorated(False)
+            self.fullscreen_on_monitor(monitor)
 
         self.canvas = SelectCanvas(self)
         self.set_child(self.canvas)
@@ -1263,10 +1424,7 @@ class Editor(Gtk.Window):
             b.add_css_class("swatch")
             b.set_valign(Gtk.Align.CENTER)
             b.set_tooltip_text(name)
-            prov = Gtk.CssProvider()
-            prov.load_from_string(".swatch-%d { background-color: %s; }" % (i, hx))
-            b.get_style_context().add_provider(prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-            b.add_css_class("swatch-%d" % i)
+            b.add_css_class("swatch-%d" % i)  # цвет задаёт общий CSS (см. App.do_startup)
             if sw_group is None:
                 sw_group = b
             else:
@@ -1725,11 +1883,8 @@ class Editor(Gtk.Window):
         return self.render_region(*self.export_rect())
 
     def copy(self):
-        surface = self.export_surface()
-        if copy_to_clipboard(surface, surface_to_png(surface)):
-            self.flash(tr("✓ Copied to clipboard"))
-        else:
-            self.flash(tr("Couldn't copy"))
+        copy_to_clipboard(self.export_surface())
+        self.flash(tr("✓ Copied to clipboard"))
 
     def save(self):
         try:
@@ -1794,6 +1949,10 @@ class App(Gtk.Application):
         self.cap = None
         self.thumbnail = None
         self.editors = []
+        self.last_shot = None
+        self.grabbing = False
+        self.layer_shell = False
+        self.portal_hotkeys = None
 
     def do_startup(self):
         Gtk.Application.do_startup(self)
@@ -1802,20 +1961,36 @@ class App(Gtk.Application):
             ("capture", self.on_capture),
             ("fullscreen", self.on_fullscreen),
             ("cancel", lambda *_: self.cancel_capture()),
+            ("edit-last", lambda *_: self.last_shot and self.open_editor(self.last_shot)),
             ("quit", lambda *_: self.quit()),
         ):
             act = Gio.SimpleAction.new(name, None)
             act.connect("activate", cb)
             self.add_action(act)
+        # Селектор не слабее общего правила для кнопок панели, иначе фон кнопки перебьёт цвет.
+        css = CSS + "".join(
+            ".editor-toolbar button.swatch.swatch-%d { background-color: %s; }\n" % (i, hx) for i, (hx, _n) in enumerate(PALETTE)
+        ).encode()
         prov = Gtk.CssProvider()
-        prov.load_from_bytes(GLib.Bytes.new(CSS))
+        prov.load_from_bytes(GLib.Bytes.new(css))
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        if not os.path.exists(CONFIG_PATH):
-            # Первый запуск у этого пользователя: пакет ставится root'ом, а глобальные
-            # клавиши — пользовательские, поэтому назначаем их сами.
-            GLib.idle_add(self._first_run)
+        self.layer_shell = LayerShell is not None and not NO_LAYER_SHELL and LayerShell.is_supported()
+        if not self.layer_shell:
+            print("layer-shell unavailable: fullscreen overlay window and notifications instead", file=sys.stderr)
+        first_run = not os.path.exists(CONFIG_PATH)
+        if kde_hotkeys_available():
+            if first_run:
+                # Первый запуск у этого пользователя: пакет ставится root'ом, а глобальные
+                # клавиши — пользовательские, поэтому назначаем их сами.
+                GLib.idle_add(self._first_run_kde)
+        else:
+            write_default_config()
+            self.portal_hotkeys = PortalHotkeys(self)
+            self.portal_hotkeys.start()
+            if IN_FLATPAK and first_run:
+                request_autostart()
 
-    def _first_run(self):
+    def _first_run_kde(self):
         try:
             install_hotkey()
         except Exception as e:
@@ -1827,8 +2002,11 @@ class App(Gtk.Application):
         cmd = args[0] if args else "capture"
         if cmd == "daemon":
             pass
-        elif cmd in ("capture", "fullscreen", "cancel", "quit"):
+        elif cmd in ("capture", "fullscreen", "cancel", "edit-last", "quit"):
             self.activate_action(cmd, None)
+        elif cmd == "install-hotkey" and self.portal_hotkeys is not None:
+            self.portal_hotkeys.bind()
+            cmdline.print_literal(tr("Shortcuts requested from the desktop; confirm them if it asks.") + "\n")
         else:
             cmdline.printerr_literal(USAGE)
             return 2
@@ -1838,20 +2016,22 @@ class App(Gtk.Application):
         self.on_capture()
 
     # --- capture flow
-    def _grab(self):
-        try:
-            return Capture.grab()
-        except Exception as e:
-            self.notify_error(tr("Couldn't take a screenshot: %s") % e)
-            return None
+    def _grab_failed(self, message):
+        self.grabbing = False
+        if message:
+            self.notify_error(tr("Couldn't take a screenshot: %s") % message)
 
     def on_fullscreen(self, *_):
         """Снимок всего экрана без выделения: буфер + миниатюра, дальше как обычно."""
+        if self.grabbing:
+            return
         if self.overlays:
             self._close_overlays()
-        cap = self._grab()
-        if cap is None:
-            return
+        self.grabbing = True
+        Capture.grab_async(self._fullscreen_ready, self._grab_failed)
+
+    def _fullscreen_ready(self, cap):
+        self.grabbing = False
         surface = cap.crop(0, 0, cap.width, cap.height)
         copy_to_clipboard_background(surface)
         monitors = Gdk.Display.get_default().get_monitors()
@@ -1859,16 +2039,18 @@ class App(Gtk.Application):
         self.show_thumbnail(Shot(surface), monitor)
 
     def on_capture(self, *_):
-        if self.overlays:
+        if self.overlays or self.grabbing:
             return
-        # Meta+Shift+S, когда редактор в фокусе: вырезаем кусок уже снятого.
+        # Клавиша снимка области, когда редактор в фокусе: вырезаем кусок уже снятого.
         for ed in self.editors:
             if ed.is_active():
                 ed.start_crop()
                 return
-        cap = self._grab()
-        if cap is None:
-            return
+        self.grabbing = True
+        Capture.grab_async(self._show_overlays, self._grab_failed)
+
+    def _show_overlays(self, cap):
+        self.grabbing = False
         self.cap = cap
         display = Gdk.Display.get_default()
         monitors = display.get_monitors()
@@ -1927,8 +2109,17 @@ class App(Gtk.Application):
         self.show_thumbnail(Shot(surface), monitor)
 
     def show_thumbnail(self, shot, monitor):
+        self.last_shot = shot
         if self.thumbnail is not None:
             self.thumbnail.dismiss()
+        if not self.layer_shell:
+            # Без layer-shell окно в углу поверх всего не поставить: зовём через уведомление.
+            n = Gio.Notification.new(tr("Screenshot copied"))
+            n.set_body(tr("Click to annotate"))
+            n.set_icon(Gio.ThemedIcon.new(APP_ID))
+            n.set_default_action("app.edit-last")
+            self.send_notification("shot", n)
+            return
         self.thumbnail = Thumbnail(self, shot, monitor)
         self.thumbnail.present()
 
@@ -1949,6 +2140,84 @@ class App(Gtk.Application):
             pass
 
 
+# --------------------------------------------------------------------------- hotkeys through the portal
+
+
+class PortalHotkeys:
+    """Глобальные клавиши через портал GlobalShortcuts: Flatpak и окружения без kglobalaccel.
+
+    Сессию держит запущенный экземпляр; рабочий стол может один раз попросить подтверждения.
+    """
+
+    IDS = {"region": "capture", "fullscreen": "fullscreen"}  # ключ конфига → действие приложения
+
+    def __init__(self, app):
+        self.app = app
+        self.session = None
+
+    def start(self):
+        portal_request(
+            "org.freedesktop.portal.GlobalShortcuts", "CreateSession", "(a{sv})", (),
+            {"session_handle_token": GLib.Variant("s", "screenshooter%d" % os.getpid())}, self._created,
+        )
+
+    def _created(self, code, results):
+        if code != 0:
+            print("GlobalShortcuts portal: CreateSession failed (%d): %s" % (code, results), file=sys.stderr)
+            return
+        self.session = results["session_handle"]
+        session_bus().signal_subscribe(
+            PORTAL_BUS, "org.freedesktop.portal.GlobalShortcuts", "Activated", PORTAL_PATH, None,
+            Gio.DBusSignalFlags.NONE, self._activated,
+        )
+        self.bind()
+
+    def _activated(self, _conn, _sender, _path, _iface, _signal, params):
+        session, shortcut_id = params.unpack()[:2]
+        if session == self.session and shortcut_id in self.IDS.values():
+            self.app.activate_action(shortcut_id, None)
+
+    def bind(self):
+        if self.session is None:
+            return
+        keys = load_hotkeys()
+        shortcuts = []
+        for cfg, (_desktop, _action, _default, friendly) in HOTKEY_ACTIONS.items():
+            text = keys[cfg]
+            if not text or text.lower() in ("none", "off", "-"):
+                continue
+            opts = {"description": GLib.Variant("s", friendly)}
+            try:
+                opts["preferred_trigger"] = GLib.Variant("s", xdg_trigger(text))
+            except ValueError as e:
+                print(tr("%s: can't parse %r (%s)") % (friendly, text, e), file=sys.stderr)
+            shortcuts.append((self.IDS[cfg], opts))
+        portal_request(
+            "org.freedesktop.portal.GlobalShortcuts", "BindShortcuts", "(oa(sa{sv})sa{sv})",
+            (self.session, shortcuts, ""), {}, self._bound,
+        )
+
+    def _bound(self, code, results):
+        if code != 0:
+            print("GlobalShortcuts portal: BindShortcuts failed (%d): %s" % (code, results), file=sys.stderr)
+            return
+        for shortcut_id, info in results.get("shortcuts", []):
+            print("shortcut %s: %s" % (shortcut_id, info.get("trigger_description", "?")), file=sys.stderr)
+
+
+def request_autostart():
+    """Flatpak: автозапуск фонового экземпляра просим у портала Background."""
+    portal_request(
+        "org.freedesktop.portal.Background", "RequestBackground", "(sa{sv})", ("",),
+        {
+            "reason": GLib.Variant("s", tr("Keep running so screenshot hotkeys react instantly")),
+            "autostart": GLib.Variant("b", True),
+            "commandline": GLib.Variant("as", ["screenshooter", "daemon"]),
+        },
+        lambda code, results: print("background portal: %d %s" % (code, results), file=sys.stderr),
+    )
+
+
 # --------------------------------------------------------------------------- hotkey setup (KGlobalAccel over DBus)
 
 
@@ -1966,16 +2235,16 @@ def hotkey_holders(proxy, key):
 def _write_shortcut_config(desktop_id, action, text):
     # Демон пишет kglobalshortcutsrc сам, но с задержкой и не всегда — дублируем,
     # чтобы привязка пережила перезаход в сеанс.
-    cmd = ["kwriteconfig6", "--file", "kglobalshortcutsrc", "--group", "services", "--group", desktop_id, "--key", action]
+    tool = shutil.which("kwriteconfig6") or shutil.which("kwriteconfig5")
+    if not tool:
+        return
+    cmd = [tool, "--file", "kglobalshortcutsrc", "--group", "services", "--group", desktop_id, "--key", action]
     cmd += [text] if text else ["--delete"]
     subprocess.run(cmd, check=False)
 
 
 def install_hotkey():
-    if not os.path.exists(CONFIG_PATH):
-        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            f.write(DEFAULT_CONFIG)
+    write_default_config()
     proxy = _kga()
     keys = load_hotkeys()
     all_ok = True
@@ -2034,6 +2303,7 @@ USAGE = """usage: screenshooter [COMMAND]
   cancel             close the region selection overlay
   daemon             start the background instance without capturing
   quit               stop the background instance
+  edit-last          open the editor for the last screenshot
   install-hotkey     (re)register global shortcuts from ~/.config/screenshooter.conf
   uninstall-hotkey   remove the global shortcuts
   --version          print the version
@@ -2048,9 +2318,18 @@ def main(argv):
     if cmd in ("-V", "--version"):
         print("screenshooter", VERSION)
         return 0
-    if cmd == "install-hotkey":
+    if (Gtk.get_major_version(), Gtk.get_minor_version()) < MIN_GTK:
+        print("Screenshooter needs GTK %d.%d or newer, found %d.%d."
+              % (MIN_GTK + (Gtk.get_major_version(), Gtk.get_minor_version())), file=sys.stderr)
+        return 1
+    if cmd in ("install-hotkey", "uninstall-hotkey") and not kde_hotkeys_available():
+        if cmd == "uninstall-hotkey":
+            print(tr("Shortcuts are managed by your desktop: change or remove them in System Settings."))
+            return 0
+        # install-hotkey в портальном режиме обрабатывает запущенный экземпляр (у него сессия портала).
+    elif cmd == "install-hotkey":
         return 0 if install_hotkey() else 1
-    if cmd == "uninstall-hotkey":
+    elif cmd == "uninstall-hotkey":
         uninstall_hotkey()
         return 0
     app = App()

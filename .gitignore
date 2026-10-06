@@ -6,3 +6,4 @@ __pycache__/
 /packaging/aur/pkg/
 /packaging/aur/*.tar.*
 /packaging/aur/*.pkg.tar.*
+/src/screenshooter-grab
