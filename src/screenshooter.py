@@ -2297,6 +2297,7 @@ def install_hotkey():
             None,
         )
         got = res.unpack()[0]
+        debug("kglobalaccel setShortcut ->", [hex(k) for k in got])
         ok = code in got
         if ok:
             print(tr("%s — %s: assigned") % (friendly, text))

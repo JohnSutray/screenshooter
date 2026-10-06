@@ -245,7 +245,15 @@ a = Gtk.Application(application_id='%s'); a.connect('activate', act); a.run([])
     holders = wait_for(lambda: bus.call_sync("org.kde.kglobalaccel", "/kglobalaccel", "org.kde.KGlobalAccel",
                                              "getGlobalShortcutsByKey", GLib.Variant("(i)", (META_SHIFT_S,)),
                                              None, 0, 3000, None).unpack()[0], 5)
-    check("first start registers Meta+Shift+S", any(r[2] == APP_ID + ".desktop" for r in holders), str([r[2] for r in holders]))
+    if not check("first start registers Meta+Shift+S", any(r[2] == APP_ID + ".desktop" for r in holders), str([r[2] for r in holders])):
+        try:
+            comp = bus.call_sync("org.kde.kglobalaccel", "/kglobalaccel", "org.kde.KGlobalAccel", "getComponent",
+                                 GLib.Variant("(s)", (APP_ID + ".desktop",)), None, 0, 3000, None).unpack()[0]
+            infos = bus.call_sync("org.kde.kglobalaccel", comp, "org.kde.kglobalaccel.Component", "allShortcutInfos",
+                                  None, None, 0, 3000, None).unpack()[0]
+            print("      component %s: %s" % (comp, [(i[0], [hex(k) for k in i[6]], [hex(k) for k in i[7]]) for i in infos]), flush=True)
+        except Exception as e:
+            print("      component lookup failed:", e, flush=True)
 
     # Region capture: a fullscreen layer-shell overlay.
     def overlays():
