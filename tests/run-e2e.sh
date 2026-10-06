@@ -12,6 +12,7 @@ chmod 700 "$work/runtime"
 export XDG_CONFIG_HOME=$work/config
 export XDG_RUNTIME_DIR=$work/runtime
 export E2E_RESULT=$work/result
+export SCREENSHOOTER_DEBUG=1
 unset WAYLAND_DISPLAY DISPLAY
 # KWin picks a software renderer when there is no GPU (containers, CI).
 export LIBGL_ALWAYS_SOFTWARE=${LIBGL_ALWAYS_SOFTWARE:-1}

@@ -157,6 +157,11 @@ def tr(text):
     return _TR.get(text, text)
 
 
+def debug(*args):
+    if os.environ.get("SCREENSHOOTER_DEBUG"):
+        print("[debug]", *args, file=sys.stderr, flush=True)
+
+
 # --------------------------------------------------------------------------- hotkeys
 
 # Действия для KGlobalAccel: ключ в конфиге → (desktop-файл, действие, клавиша по умолчанию, подпись).
@@ -2271,23 +2276,28 @@ def install_hotkey():
             print(tr("%s: can't parse %r (%s)") % (friendly, text, e))
             all_ok = False
             continue
+        debug("kglobalaccel getGlobalShortcutsByKey", hex(code))
         for comp, other in hotkey_holders(proxy, code):
             if comp == desktop_id and other == action:
                 continue
             print(tr("Taking %s away from %s / %s") % (text, comp, other))
             proxy.call_sync("unregister", GLib.Variant("(ss)", (comp, other)), Gio.DBusCallFlags.NONE, -1, None)
         action_id = GLib.Variant("as", [desktop_id, action, "Screenshooter", friendly])
+        debug("kglobalaccel doRegister", desktop_id, action)
         proxy.call_sync("doRegister", GLib.Variant.new_tuple(action_id), Gio.DBusCallFlags.NONE, -1, None)
+        # Классический setShortcut с простыми int: он есть во всех версиях kglobalaccel, а более новый
+        # setShortcutKeys (a(ai)) на некоторых сборках KWin роняет сам KWin при разборе ответа.
         # flags: SetPresent(2) | NoAutoloading(4) — назначить принудительно, не оглядываясь на старый конфиг.
+        debug("kglobalaccel setShortcut", desktop_id, action, hex(code))
         res = proxy.call_sync(
-            "setShortcutKeys",
-            GLib.Variant.new_tuple(action_id, GLib.Variant("a(ai)", [([code],)]), GLib.Variant("u", 2 | 4)),
+            "setShortcut",
+            GLib.Variant.new_tuple(action_id, GLib.Variant("ai", [code]), GLib.Variant("u", 2 | 4)),
             Gio.DBusCallFlags.NONE,
             -1,
             None,
         )
         got = res.unpack()[0]
-        ok = any(code in (seq[0] if isinstance(seq, tuple) else seq) for seq in got)
+        ok = code in got
         if ok:
             print(tr("%s — %s: assigned") % (friendly, text))
         else:
